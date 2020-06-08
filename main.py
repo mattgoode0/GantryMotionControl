@@ -1,9 +1,11 @@
 import math
+import threading
 import serial
 import serial.tools.list_ports
 import time
 import webbrowser
 import cv2
+import collections
 from tkinter import *
 from tkinter import messagebox
 from zaber_motion import Units, Library, MotionLibException
@@ -16,6 +18,7 @@ class MainGUI:
     canvas_y = 900
     scale_factor = canvas_x/300
     cap = cv2.VideoCapture(0)
+    rotaryStage = Thorlabs.K10CR1(str(55142424))
 
     def __init__(self):
         self.window = Tk()
@@ -24,37 +27,36 @@ class MainGUI:
         self.connected_text.pack()
         self.check_connection()
         self.canvas_create()
-        with Thorlabs.K10CR1(str(55142424)) as self.rotaryStage:
-            self.rotaryStage.set_velocity_params(20, acceleration=None)
-            with Connection.open_serial_port(self.zaberport) as connection:
-                self.device_list = connection.detect_devices()
-                self.connected_text.configure(text="Found {} devices".format(len(self.device_list)))
+        self.rotaryStage.set_velocity_params(20, acceleration=None)
+        with Connection.open_serial_port(self.zaberport) as connection:
+            self.device_list = connection.detect_devices()
+            self.connected_text.configure(text="Found {} devices".format(len(self.device_list)))
 
-                if len(self.device_list) == 2:
-                    pass
-                elif len(self.device_list) == 1:
-                    messagebox.showerror('Error', 'Only one stage controllers is connected.\nCheck the connection then reopen')
-                    quit()
-                else:
-                    messagebox.showerror('Error',
-                                         'More than 2 Zaber controllers are conntected. \nEnsure only two controllers are connected')
-                    quit()
+            if len(self.device_list) == 2:
+                pass
+            elif len(self.device_list) == 1:
+                messagebox.showerror('Error', 'Only one stage controllers is connected.\nCheck the connection then reopen')
+                quit()
+            else:
+                messagebox.showerror('Error',
+                                     'More than 2 Zaber controllers are conntected. \nEnsure only two controllers are connected')
+                quit()
 
-                self.xyController = self.device_list[0]
-                self.zController = self.device_list[1]
-                self.Xaxis = self.xyController.get_axis(1)
-                self.Yaxis = self.xyController.get_axis(2)
-                self.Zaxis = self.zController.get_axis(1)
+            self.xyController = self.device_list[0]
+            self.zController = self.device_list[1]
+            self.Xaxis = self.xyController.get_axis(1)
+            self.Yaxis = self.xyController.get_axis(2)
+            self.Zaxis = self.zController.get_axis(1)
 
-                menu = Menu(self.window)
-                self.window.config(menu=menu)
-                filemenu = Menu(menu)
-                menu.add_cascade(label='File', menu=filemenu)
-                filemenu.add_command(label='Home', command=self.zaber_home)
-                filemenu.add_command(label='Help', command=lambda: webbrowser.open('https://iastate.box.com/s/huwdeysldcoheqrfgy4wmlfk6vyvoyvu'))
-                filemenu.add_command(label='Quit', command=quit)
+            menu = Menu(self.window)
+            self.window.config(menu=menu)
+            filemenu = Menu(menu)
+            menu.add_cascade(label='File', menu=filemenu)
+            filemenu.add_command(label='Home', command=self.zaber_home)
+            filemenu.add_command(label='Help', command=lambda: webbrowser.open('https://iastate.box.com/s/huwdeysldcoheqrfgy4wmlfk6vyvoyvu'))
+            filemenu.add_command(label='Quit', command=quit)
 
-                self.window.mainloop()
+            self.window.mainloop()
 
     def check_connection(self):
         '''
@@ -92,7 +94,14 @@ class MainGUI:
         '''
         self.xyController.all_axes.home()
         self.zController.all_axes.home()
-        #self.rotaryStage.home(sync=True, force=True, timeout=None)
+        try:
+            CommData = collections.namedtuple("CommData", ["messageID", "data", "source", "dest"])
+            homeParameter = CommData(messageID=1090, data=b"\x01\x00\x02\x00\x01\x00'{^\x04UU\x08\x00", source=80, dest=1)
+            self.rotaryStage.send_comm_data(0x0440, homeParameter.data)
+            self.rotaryStage.home(sync=True, force=True, timeout=None)
+
+        except:
+            print('An exception occurred')
 
     def canvas_create(self):
         '''
@@ -294,7 +303,8 @@ class MainGUI:
         self.c.create_image(0, 0, image=self.videofeed, anchor=NW)'''
 
     def rotateGrating(self):
-        self.rotaryStage.move_to(str(self.gratingAngle.get()))
+        self.desiredGratingAngle = int(self.gratingAngle.get())
+        self.rotaryStage.move_to(self.desiredGratingAngle)
         self.rotaryStage.wait_for_move(timeout=None)
 
     def videoFeed(self):
@@ -308,6 +318,7 @@ class MainGUI:
 
 
     def quit(self):     # quit command for GUI
+        self.cv2image.terminate()
         self.window.destroy()
 
 Library.toggle_device_db_store(True)
