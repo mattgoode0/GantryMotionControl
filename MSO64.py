@@ -1,8 +1,5 @@
 import pyvisa #https://pyvisa.readthedocs.io/en/latest/
 import time
-import numpy
-from datetime import datetime
-import pylab
 
 
 class MSO64:
@@ -19,8 +16,9 @@ class MSO64:
         # Configure scope using SCPI commands
 
         # Reset instrument. Turn on display of all four channels
-        self.channelDisplay = str("*RST;:DIS:GLO:CH1:STATE 1;:DIS:GLO:CH2:STATE 1;:DIS:GLO:CH3:STATE 1;:DIS:GLO:CH4:STATE 1")
-        self.scope.write(channelDisplay)
+        self.channelDisplay = str("*RST;:DIS:GLO:CH1:STATE 1"
+                                  ";:DIS:GLO:CH2:STATE 1;:DIS:GLO:CH3:STATE 1;:DIS:GLO:CH4:STATE 1")
+        self.scope.write(self.channelDisplay)
 
         # Name Channels
         self.ch1Label = str("SAW Signal")
@@ -60,8 +58,8 @@ class MSO64:
         self.CurrentTime = time.strftime("%Y%m%d-%H%M")
         self.rfBase += self.CurrentTime + ".wfm"
         self.dcBase += self.CurrentTime + ".wfm"
-        self.rfSaveCMD += self.rfBase + "\\"
-        self.dcSaveCMD += self.dcBase + "\\"
+        self.rfSaveCMD += self.rfBase + "\""
+        self.dcSaveCMD += self.dcBase + "\""
 
-    def DisconnectMSO(self):
-        self.scope.
+    def disconnectMSO(self):
+        self.scope.close()

@@ -6,12 +6,14 @@ import time
 import webbrowser
 import cv2
 import collections
+from MSO64 import *
 from tkinter import *
 from tkinter import messagebox
 from zaber_motion import Units, Library, MotionLibException
 from zaber_motion.ascii import Connection, AxisSettings
 from PIL import Image, ImageTk
 from pylablib.aux_libs.devices import Thorlabs
+
 
 class MainGUI:
     canvas_x = 900
@@ -279,7 +281,6 @@ class MainGUI:
         self.scanProgress.config(text='Scan Complete')
         self.ScanProgressPercent.config(text='')
 
-
     def zStageUpStart(self, e):
         self.Zaxis.move_velocity((-1*self.zStageSpeed.get()/1000), unit=Units.VELOCITY_MILLIMETRES_PER_SECOND)
         print('Z Up at speed', (-1*self.zStageSpeed.get()/1000))
@@ -316,10 +317,10 @@ class MainGUI:
         self.c.create_image(0, 0, image=self.videofeed, anchor=NW)
         #self.c.after(1, self.videoFeed)
 
-
     def quit(self):     # quit command for GUI
         self.cv2image.terminate()
         self.window.destroy()
+
 
 Library.toggle_device_db_store(True)
 app = MainGUI()
