@@ -5,22 +5,21 @@ import time
 import webbrowser
 import cv2
 import collections
-import threading
 from tkinter import *
 from tkinter import messagebox
 from zaber_motion import Units, Library, MotionLibException
-from zaber_motion.ascii import Connection, AxisSettings
+from zaber_motion.ascii import Connection
 from PIL import Image, ImageTk
 from pylablib.aux_libs.devices import Thorlabs
 
 
 class MainGUI:
-    canvas_x = 900
-    canvas_y = 900
-    scale_factor = canvas_x/300
+    canvas_x = 900  # pixel size of canvas GUI
+    canvas_y = 900  # pixel size of canvas GUI
+    scale_factor = canvas_x/300  # determines scale factor for canvas to mm of the linear stages
     cap = cv2.VideoCapture(0)
     rotaryStage = Thorlabs.K10CR1(str(55142424))
-    micro_step_size = 1.97450259 # units in um
+    micro_step_size = 1.97450259  # Set value from Zaber, units in um
     axis_resolution = 64
 
     def __init__(self):
@@ -31,18 +30,22 @@ class MainGUI:
         self.check_connection()
         self.canvas_create()
         self.rotaryStage.set_velocity_params(20, acceleration=None)
+
         with Connection.open_serial_port(self.zaberport) as connection:
             self.device_list = connection.detect_devices()
             self.connected_text.configure(text="Found {} devices".format(len(self.device_list)))
 
+            #Error checking to ensure all zaber products are connected
             if len(self.device_list) == 2:
                 pass
             elif len(self.device_list) == 1:
-                messagebox.showerror('Error', 'Only one stage controllers is connected.\nCheck the connection then reopen')
+                messagebox.showerror('Error', 'Only one stage controllers is connected.'
+                                              '\nCheck the connection then reopen')
                 quit()
             else:
                 messagebox.showerror('Error',
-                                     'More than 2 Zaber controllers are conntected. \nEnsure only two controllers are connected')
+                                     'More than 2 Zaber controllers are connected. '
+                                     '\nEnsure only two controllers are connected')
                 quit()
 
             self.xyController = self.device_list[0]
@@ -56,15 +59,16 @@ class MainGUI:
             filemenu = Menu(menu)
             menu.add_cascade(label='File', menu=filemenu)
             filemenu.add_command(label='Home', command=self.zaber_home)
-            filemenu.add_command(label='Help', command=lambda: webbrowser.open('https://iastate.box.com/s/huwdeysldcoheqrfgy4wmlfk6vyvoyvu'))
+            filemenu.add_command(label='Help', command=lambda: webbrowser.open(
+                'https://iastate.box.com/s/huwdeysldcoheqrfgy4wmlfk6vyvoyvu'))
             filemenu.add_command(label='Quit', command=quit)
 
             self.window.mainloop()
 
     def check_connection(self):
-        '''
+        """
         Asks user to check if zaber products are connected to device
-        '''
+        """
         if messagebox.askokcancel('Connect', 'Connect to Zaber products'):
             self.zaberport = self.find_com_ports()
             if self.zaberport is not None:
@@ -72,7 +76,8 @@ class MainGUI:
                 self.connected_text.update_idletasks()
                 return self.zaberport
             else:
-                self.connected_text.config(text='No Zaber products are currently plugged in. Check the connection then reopen')
+                self.connected_text.config(text='No Zaber products are currently plugged in. '
+                                                'Check the connection then reopen')
                 self.connected_text.update_idletasks()
                 time.sleep(10)
                 quit()
@@ -80,11 +85,10 @@ class MainGUI:
             quit()
 
     def find_com_ports(self):
-        '''
+        """
         find_com_ports(): Finds all the COM ports that are plugged into the computer
         and returns any that have the term 'serial' in them
-        and returns any that have the term 'serial' in them
-        '''
+        """
         self.port = serial.tools.list_ports.comports()
         for self.port, self.desc, self.hwid in sorted(self.port):
             print(self.port+','+self.desc)
@@ -92,50 +96,63 @@ class MainGUI:
                 return self.port
 
     def zaber_home(self):
-        '''
+        """
         home command for all stages
-        '''
-        self.xyController.all_axes.home()
-        self.zController.all_axes.home()
+        """
+        try:
+            self.xyController.all_axes.home()
+            self.zController.all_axes.home()
+        except MotionLibException as err:
+            messagebox.showerror('Error', err)
+
         try:
             CommData = collections.namedtuple("CommData", ["messageID", "data", "source", "dest"])
-            homeParameter = CommData(messageID=1090, data=b"\x01\x00\x02\x00\x01\x00'{^\x04UU\x08\x00", source=80, dest=1)
+            homeParameter = CommData(messageID=1090, data=b"\x01\x00\x02\x00\x01\x00'{^\x04UU\x08\x00",
+                                     source=80, dest=1)
             self.rotaryStage.send_comm_data(0x0440, homeParameter.data)
             self.rotaryStage.home(sync=True, force=True, timeout=None)
-
         except:
-            print('An exception occurred')
+            messagebox.showerror('Error', 'An error occured during ThorLabs Homing. '
+                                          '\nCheck all connections and retry.')
+
+        # Update status feed with homing complete
         self.status_feed.config(text='Home Complete')
-        self.status_feed.update_idletasks()
 
     def canvas_create(self):
-        '''
-        Creates canvas for users to select which points they want the stage to go to and allocates button clicks to functions
-        '''
+        """
+        Creates canvas for users to select points and allocates button clicks to functions
+        """
         self.color_fg = 'black'
         self.color_bg = 'white'
         self.old_x = None
         self.old_y = None
         self.penwidth = 1
         self.draw_widgets()
+
+        # Set functions to each button click while on the canvas
         self.c.bind('<ButtonPress-2>', self.square_press)  # create square
         self.c.bind('<B2-Motion>', self.square_motion)
         self.c.bind('<ButtonRelease-2>', self.square_release)
         self.c.bind('<ButtonPress-1>', self.line_press)  # create square
         self.c.bind('<B1-Motion>', self.line_motion)
-        self.c.bind('<ButtonRelease-1>', self.line_release)# create point or line
+        self.c.bind('<ButtonRelease-1>', self.line_release)  # create point or line
 
     def draw_widgets(self):
-        self.controls = Frame(self.window, padx=5, pady=5)
+        """
+        Creates canvas for motion control along with input values (speed, stepsize, etc)
+        """
+        self.controls = Frame(self.window, padx=5, pady=5)  # canvas creation for the GUI
 
+        # scan speed input value (units in mm/sec)
         self.scan_speed = IntVar()
         self.scan_speed.set(300)
         Label(self.controls, text='XY Stage Velocity (mm/sec)').pack()
         self.scan_speed_select = OptionMenu(self.controls, self.scan_speed, 50, 100, 150, 200, 250, 300)
         self.scan_speed_select.pack()
-
         Label(self.controls, text='').pack()
 
+        # step over size input value (units in micrometers).
+        # This is both the stepover for a square and point to point distance
         self.stepover_size = IntVar()
         self.stepover_size.set(250)
         Label(self.controls, text='Scan Stepover Value (um)').pack()
@@ -145,6 +162,7 @@ class MainGUI:
         self.canvas_function = IntVar()
         self.canvas_function.set(1)
 
+        # Z axis control buttons (up down)
         Label(self.controls, text='\n\n').pack()
         self.buttonZUp = Button(self.controls, text='Z Up', width=15)
         self.buttonZUp.pack()
@@ -157,6 +175,7 @@ class MainGUI:
         self.buttonZDown.bind('<ButtonPress-1>', self.zStageDownStart)
         self.buttonZDown.bind('<ButtonRelease-1>', self.zStageDownEnd)
 
+        # Z axis speed control select
         Label(self.controls, text='').pack()
         self.zStageSpeed = IntVar()
         self.zStageSpeed.set(1000)
@@ -164,6 +183,7 @@ class MainGUI:
         self.zStageSpeed_select = OptionMenu(self.controls, self.zStageSpeed, 500, 1000, 5000, 10000)
         self.zStageSpeed_select.pack()
 
+        # grating angle select
         Label(self.controls, text='\n\n').pack()
         self.gratingAngle = IntVar()
         self.gratingAngle.set(0)
@@ -171,33 +191,42 @@ class MainGUI:
         self.gratingAngle_select = OptionMenu(self.controls, self.gratingAngle, 0, 20, 40, 60, 80)
         self.gratingAngle_select.pack()
 
+        # grating angle 'command' button - causes unit to realign
         self.gratingAlign = Button(self.controls, text='Align Grating', width=15, command=self.rotateGrating)
         self.gratingAlign.pack()
 
         self.controls.pack(side=LEFT)
-
         self.c = Canvas(self.window, width=self.canvas_x, height=self.canvas_y, bg=self.color_bg, )
         self.c.pack()
 
+        # Creates status feed box at lower part of the window
         self.status_feed = Label(self.window, text='', font=("Arial", 18), justify=RIGHT)
         self.status_feed.pack()
 
         self.videoFeed()
 
     def line_press(self, e):
-        '''
-        Code that controls when a person clicks down on the left mouse button
-        '''
+        """
+        Sets initial X and Y point based on user click on the canvas with a left mouse button
+        """
         self.initialLineX = e.x
         self.initialLineY = e.y
 
     def line_motion(self, e):
+        """
+        Creates a line from initial point (line_press) to the current location
+        """
         self.c.delete(ALL)
         self.videoFeed()
         self.c.create_line(self.initialLineX, self.initialLineY, e.x, e.y, width=self.penwidth, fill=self.color_fg,
                            capstyle=ROUND, smooth=True)
+
     def line_release(self, e):
-        if e.x >= self.canvas_x:      #error checking to make sure the final point is on the Canvas
+        """
+        Creates final line from initial point to the point of button release
+        """
+        # error checking to make sure the final point is on the Canvas
+        if e.x >= self.canvas_x:
             e.x = self.canvas_x
         elif e.x <= 0:
             e.x = 0
@@ -205,6 +234,7 @@ class MainGUI:
             e.y = self.canvas_y
         elif e.y <= 0:
             e.y = 0
+
         self.finalLineX = e.x
         self.finalLineY = e.y
         self.c.delete(ALL)
@@ -214,25 +244,26 @@ class MainGUI:
         self.scan_line()
 
     def square_press(self, e):
-        '''
-        Code that controls when a person clicks down on the middle mouse button
-        '''
+        """
+        Sets initial X and Y point based on user click on the canvas with a middle mouse button
+        """
         self.initial_X = e.x
         self.initial_Y = e.y
 
     def square_motion(self, e):
-        '''
-        Code that controls when a person clicks down on the middle mouse button
-        '''
+        """
+        Creates a square from initial point (square_press) to the current location
+        """
         self.c.delete(ALL)
         self.videoFeed()
         self.c.create_rectangle(self.initial_X, self.initial_Y, e.x, e.y, fill='black')
 
     def square_release(self, e):
-        '''
-        Code that controls when a person releases the middle mouse button
-        '''
-        if e.x >= self.canvas_x:      #error checking to make sure the final point is on the Canvas
+        """
+        Creates final square from initial point to the point of button release
+        """
+        # error checking to make sure the final point is on the Canvas
+        if e.x >= self.canvas_x:
             e.x = self.canvas_x
         elif e.x <= 0:
             e.x = 0
@@ -240,20 +271,18 @@ class MainGUI:
             e.y = self.canvas_y
         elif e.y <= 0:
             e.y = 0
+
         self.final_X = e.x
         self.final_Y = e.y
         self.c.delete(ALL)
         self.videoFeed()
         self.c.create_rectangle(self.initial_X, self.initial_Y, e.x, e.y, fill='black')
-        print('Initial points', self.initial_X,',', self.initial_Y)
-        print('Final points', self.final_X,',', self.final_Y)
         self.scan_square()
 
     def scan_square(self):
-        '''
-        takes points from the square created in squareRelease and controls Zaber stages until scan is complete
-        :return:
-        '''
+        """
+        takes points from the square created in square_release and commands Zaber stages
+        """
         # Update scan status to starting scan
         self.status_feed.config(text='Scan Starting')
         self.status_feed.update_idletasks()
@@ -273,7 +302,7 @@ class MainGUI:
             self.start_Y = self.final_Y/self.scale_factor
             self.end_Y = self.initial_Y/self.scale_factor
 
-        i = round(float(self.start_Y),5)
+        i = round(float(self.start_Y), 5)
 
         try:
             # sets velocity of stage sand moves to starting XY position
@@ -282,7 +311,8 @@ class MainGUI:
             self.Xaxis.move_absolute(self.start_X, Units.LENGTH_MILLIMETRES)
 
             # calculates and sets trigger
-            self.xyController.generic_command(self.trigger_command_creator(self.stepover_size.get(), "X"), check_errors=True)
+            self.xyController.generic_command(self.trigger_command_creator(self.stepover_size.get(), "X"),
+                                              check_errors=True)
             time.sleep(2)
 
             while i <= self.end_Y:
@@ -299,20 +329,20 @@ class MainGUI:
 
                 # calculate how much of the scan has been completed and update status feed
                 self.scanPrecentCompleteCalculation = round(((i-self.start_Y)/(self.end_Y-self.start_Y))*100, 1)
-                self.status_feed.config(text=("Precent complete: " + str(self.scanPrecentCompleteCalculation) + "%"))
+                self.status_feed.config(text=("Percent complete: " + str(self.scanPrecentCompleteCalculation) + "%"))
                 self.status_feed.update_idletasks()
 
         except MotionLibException as err:
-            print(err)
+            messagebox.showerror('Error', err)
 
         # Update status feed to scan complete
         self.status_feed.config(text='Scan Complete')
 
     def scan_line(self):
-        '''
+        """
         Code that takes the start and end points of a line, calculates each axis's velocity, and commands stage
         to the start/end points
-        '''
+        """
         # Update scan status to starting scan
         self.status_feed.config(text='Scan Starting')
         self.status_feed.update_idletasks()
@@ -352,7 +382,8 @@ class MainGUI:
 
         try:
             # set and turn on Zaber trigger
-            self.xyController.generic_command(self.trigger_command_creator(self.line_trigger_value, self.which_axis), check_errors=True)
+            self.xyController.generic_command(self.trigger_command_creator(self.line_trigger_value, self.which_axis),
+                                              check_errors=True)
             self.xyController.generic_command("trigger 1 enable", check_errors=True)
 
             # set velocity
@@ -369,42 +400,53 @@ class MainGUI:
             self.Yaxis.move_absolute(self.end_Y / self.scale_factor, Units.LENGTH_MILLIMETRES)
 
         except MotionLibException as err:
-            print(err)
+            messagebox.showerror('Error', err)
 
         # Update status feed to scan complete
         self.status_feed.config(text='Scan Complete')
         self.status_feed.update_idletasks()
 
     def zStageUpStart(self, e):
+        """
+        Commands Z axis up start at speed specified.
+        """
         try:
             self.Zaxis.move_velocity((-1*self.zStageSpeed.get()/1000), unit=Units.VELOCITY_MILLIMETRES_PER_SECOND)
         except MotionLibException as err:
-            print(err)
+            messagebox.showerror('Error', err)
 
     def zStageUpEnd(self, e):
+        """
+        Commands Z axis up stop.
+        """
         try:
             self.Zaxis.stop(wait_until_idle=True)
         except MotionLibException as err:
-            print(err)
+            messagebox.showerror('Error', err)
 
     def zStageDownStart(self, e):
+        """
+        Commands Z axis down start at speed specified.
+        """
         try:
             self.Zaxis.move_velocity((self.zStageSpeed.get()/1000), unit=Units.VELOCITY_MILLIMETRES_PER_SECOND)
         except MotionLibException as err:
-            print(err)
+            messagebox.showerror('Error', err)
 
     def zStageDownEnd(self, e):
+        """
+        Commands Z axis down stop.
+        """
         try:
             self.Zaxis.stop(wait_until_idle=True)
         except MotionLibException as err:
-            print(err)
+            messagebox.showerror('Error', err)
 
     def trigger_command_creator(self, e, i):
-        '''
+        """
         Inputs: step over size (user input), micro step size (value from Zaber), axis resolution (value from Zaber)
         :return: ASCII protocal for updating trigger to specified step value
-        '''
-
+        """
         self.trigger_value = int(e / self.micro_step_size)
         if i == "X":
             self.trigger_command = "trigger dist 1 1 " + str(self.trigger_value)
@@ -421,27 +463,30 @@ class MainGUI:
         self.c.create_image(0, 0, image=self.videofeed, anchor=NW)'''
 
     def rotateGrating(self):
-        '''
+        """
         Commands Thorlabs K10CR1/M to rotate to specified angle
-        '''
+        """
         if int(self.gratingAngle.get()) != round(self.rotaryStage.get_position(), 0):
             self.desiredGratingAngle = int(self.gratingAngle.get())
             self.rotaryStage.move_to(self.desiredGratingAngle)
             self.rotaryStage.wait_for_move(timeout=None)
 
     def videoFeed(self):
-        '''
+        """
         Sets up query to camera on computer to update the background image of the canvas
-        '''
+        """
         _, frame = self.cap.read()
         self.cv2image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGBA)
         self.img = Image.fromarray(self.cv2image)
         resized = self.img.resize((self.canvas_x, self.canvas_y))
         self.videofeed = ImageTk.PhotoImage(resized)
         self.c.create_image(0, 0, image=self.videofeed, anchor=NW)
-        #self.c.after(1, self.videoFeed)
+        # self.c.after(1, self.videoFeed)
 
-    def quit(self):     # quit command for GUI
+    def quit(self):
+        """
+        Quit command for GUI
+        """
         self.cv2image.terminate()
         self.window.destroy()
 
