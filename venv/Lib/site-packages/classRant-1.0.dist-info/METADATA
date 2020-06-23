@@ -1,0 +1,19 @@
+Metadata-Version: 2.1
+Name: classRant
+Version: 1.0
+Summary: A simpler class-based interface to devRantSimple
+Home-page: https://github.com/Ewpratten/classRaant
+Author: Evan Pratten
+Author-email: ewpratten@gmail.com
+License: MIT
+Platform: UNKNOWN
+Classifier: Programming Language :: Python :: 3
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Operating System :: OS Independent
+Classifier: Development Status :: 5 - Production/Stable
+Description-Content-Type: text/markdown
+Requires-Dist: devRantSimple
+
+# classRant
+
+

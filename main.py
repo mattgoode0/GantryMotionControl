@@ -1,12 +1,11 @@
 import math
-import threading
 import serial
 import serial.tools.list_ports
 import time
 import webbrowser
 import cv2
 import collections
-from MSO64 import *
+import threading
 from tkinter import *
 from tkinter import messagebox
 from zaber_motion import Units, Library, MotionLibException
@@ -21,6 +20,8 @@ class MainGUI:
     scale_factor = canvas_x/300
     cap = cv2.VideoCapture(0)
     rotaryStage = Thorlabs.K10CR1(str(55142424))
+    micro_step_size = 1.97450259 # units in um
+    axis_resolution = 64
 
     def __init__(self):
         self.window = Tk()
@@ -104,6 +105,8 @@ class MainGUI:
 
         except:
             print('An exception occurred')
+        self.status_feed.config(text='Home Complete')
+        self.status_feed.update_idletasks()
 
     def canvas_create(self):
         '''
@@ -114,17 +117,19 @@ class MainGUI:
         self.old_x = None
         self.old_y = None
         self.penwidth = 1
-        self.drawWidgets()
-        self.c.bind('<ButtonPress-2>', self.squarePress)  # create square
-        self.c.bind('<B2-Motion>', self.squareMotion)
-        self.c.bind('<ButtonRelease-2>', self.squareRelease)
-        self.c.bind('<Button-1>', self.point)  # create point or line
+        self.draw_widgets()
+        self.c.bind('<ButtonPress-2>', self.square_press)  # create square
+        self.c.bind('<B2-Motion>', self.square_motion)
+        self.c.bind('<ButtonRelease-2>', self.square_release)
+        self.c.bind('<ButtonPress-1>', self.line_press)  # create square
+        self.c.bind('<B1-Motion>', self.line_motion)
+        self.c.bind('<ButtonRelease-1>', self.line_release)# create point or line
 
-    def drawWidgets(self):
+    def draw_widgets(self):
         self.controls = Frame(self.window, padx=5, pady=5)
 
         self.scan_speed = IntVar()
-        self.scan_speed.set(50)
+        self.scan_speed.set(300)
         Label(self.controls, text='XY Stage Velocity (mm/sec)').pack()
         self.scan_speed_select = OptionMenu(self.controls, self.scan_speed, 50, 100, 150, 200, 250, 300)
         self.scan_speed_select.pack()
@@ -132,7 +137,7 @@ class MainGUI:
         Label(self.controls, text='').pack()
 
         self.stepover_size = IntVar()
-        self.stepover_size.set(100)
+        self.stepover_size.set(250)
         Label(self.controls, text='Scan Stepover Value (um)').pack()
         self.stepover_size_select = OptionMenu(self.controls, self.stepover_size, 25, 50, 100, 150, 200, 250)
         self.stepover_size_select.pack()
@@ -165,6 +170,7 @@ class MainGUI:
         Label(self.controls, text='Grating Angle').pack()
         self.gratingAngle_select = OptionMenu(self.controls, self.gratingAngle, 0, 20, 40, 60, 80)
         self.gratingAngle_select.pack()
+
         self.gratingAlign = Button(self.controls, text='Align Grating', width=15, command=self.rotateGrating)
         self.gratingAlign.pack()
 
@@ -173,48 +179,48 @@ class MainGUI:
         self.c = Canvas(self.window, width=self.canvas_x, height=self.canvas_y, bg=self.color_bg, )
         self.c.pack()
 
-        self.scanProgress = Label(self.window, text='', font=("Arial", 18), justify=RIGHT)
-        self.scanProgress.pack(side=LEFT)
-        self.ScanProgressPercent = Label(self.window, text='', font=("Arial", 18), justify=LEFT)
-        self.ScanProgressPercent.pack()
+        self.status_feed = Label(self.window, text='', font=("Arial", 18), justify=RIGHT)
+        self.status_feed.pack()
 
         self.videoFeed()
 
-    def point(self, e):
+    def line_press(self, e):
         '''
-        Code that controls when a person uses the left click funciton of a mouse
+        Code that controls when a person clicks down on the left mouse button
         '''
-        print ('Old points:',round(self.Xaxis.get_position(Units.LENGTH_MILLIMETRES),1),'',round(self.Yaxis.get_position(Units.LENGTH_MILLIMETRES),1))
+        self.initialLineX = e.x
+        self.initialLineY = e.y
 
-        if self.old_x and self.old_y:
-            self.c.create_line(self.old_x, self.old_y, e.x, e.y, width=self.penwidth, fill=self.color_fg,
-                               capstyle=ROUND, smooth=True)
-        print('New points:', e.x/self.scale_factor, ',', e.y/self.scale_factor)
-        self.x_distance = ((e.x)/self.scale_factor) - int(round(self.Xaxis.get_position(Units.LENGTH_MILLIMETRES), 1))
-        self.y_distance = ((e.y)/self.scale_factor) - int(round(self.Yaxis.get_position(Units.LENGTH_MILLIMETRES), 1))
-        self.total_move_distance = math.sqrt(abs(self.x_distance)**2 + abs(self.y_distance)**2)
+    def line_motion(self, e):
+        self.c.delete(ALL)
+        self.videoFeed()
+        self.c.create_line(self.initialLineX, self.initialLineY, e.x, e.y, width=self.penwidth, fill=self.color_fg,
+                           capstyle=ROUND, smooth=True)
+    def line_release(self, e):
+        if e.x >= self.canvas_x:      #error checking to make sure the final point is on the Canvas
+            e.x = self.canvas_x
+        elif e.x <= 0:
+            e.x = 0
+        if e.y >= self.canvas_y:
+            e.y = self.canvas_y
+        elif e.y <= 0:
+            e.y = 0
+        self.finalLineX = e.x
+        self.finalLineY = e.y
+        self.c.delete(ALL)
+        self.videoFeed()
+        self.c.create_line(self.initialLineX, self.initialLineY, self.finalLineX, self.finalLineY, width=self.penwidth,
+                           fill=self.color_fg, capstyle=ROUND, smooth=True)
+        self.scan_line()
 
-        self.x_velocity = (self.x_distance/self.total_move_distance) * self.scan_speed.get()
-        self.y_velocity = (self.y_distance / self.total_move_distance) * self.scan_speed.get()
-
-        print('X velocity:', int(round(self.x_velocity, 1)), '  Y velocity:', int(round(self.y_velocity, 1)))
-
-        self.old_x = e.x
-        self.old_y = e.y
-
-        self.Xaxis.settings.set("maxspeed", abs(int(round(self.x_velocity, 4))), Units.VELOCITY_MILLIMETRES_PER_SECOND)
-        self.Yaxis.settings.set("maxspeed", abs(int(round(self.y_velocity, 4))), Units.VELOCITY_MILLIMETRES_PER_SECOND)
-        self.Xaxis.move_absolute(e.x / self.scale_factor, Units.LENGTH_MILLIMETRES, wait_until_idle=False)
-        self.Yaxis.move_absolute(e.y / self.scale_factor, Units.LENGTH_MILLIMETRES,  wait_until_idle=False)
-
-    def squarePress(self, e):
+    def square_press(self, e):
         '''
         Code that controls when a person clicks down on the middle mouse button
         '''
         self.initial_X = e.x
         self.initial_Y = e.y
 
-    def squareMotion(self, e):
+    def square_motion(self, e):
         '''
         Code that controls when a person clicks down on the middle mouse button
         '''
@@ -222,7 +228,7 @@ class MainGUI:
         self.videoFeed()
         self.c.create_rectangle(self.initial_X, self.initial_Y, e.x, e.y, fill='black')
 
-    def squareRelease(self, e):
+    def square_release(self, e):
         '''
         Code that controls when a person releases the middle mouse button
         '''
@@ -241,61 +247,172 @@ class MainGUI:
         self.c.create_rectangle(self.initial_X, self.initial_Y, e.x, e.y, fill='black')
         print('Initial points', self.initial_X,',', self.initial_Y)
         print('Final points', self.final_X,',', self.final_Y)
-        self.scanSquare()
+        self.scan_square()
 
-    def scanSquare(self):
+    def scan_square(self):
         '''
         takes points from the square created in squareRelease and controls Zaber stages until scan is complete
         :return:
         '''
-        self.scanProgress.config(text='Scan Starting')
-        self.scanProgress.update_idletasks()
+        # Update scan status to starting scan
+        self.status_feed.config(text='Scan Starting')
+        self.status_feed.update_idletasks()
+
+        # Determines which X and Y value is the smallest and sets that value to the starting point
         if self.final_X >= self.initial_X:
-            self.start_X = self.initial_X
-            self.end_X = self.final_X
+            self.start_X = self.initial_X/self.scale_factor
+            self.end_X = self.final_X/self.scale_factor
         else:
-            self.start_X = self.final_X
-            self.end_X = self.initial_X
+            self.start_X = self.final_X/self.scale_factor
+            self.end_X = self.initial_X/self.scale_factor
+
         if self.final_Y >= self.initial_Y:
-            self.start_Y = self.initial_Y
-            self.end_Y = self.final_Y
+            self.start_Y = self.initial_Y/self.scale_factor
+            self.end_Y = self.final_Y/self.scale_factor
         else:
-            self.start_Y = self.final_Y
-            self.end_Y = self.initial_Y
+            self.start_Y = self.final_Y/self.scale_factor
+            self.end_Y = self.initial_Y/self.scale_factor
+
         i = round(float(self.start_Y),5)
-        self.Xaxis.settings.set("maxspeed", self.scan_speed.get(), Units.VELOCITY_MILLIMETRES_PER_SECOND)
-        self.Yaxis.move_absolute(i / self.scale_factor, Units.LENGTH_MILLIMETRES, wait_until_idle=False) # move to starting Y
-        self.Xaxis.move_absolute(self.start_X / self.scale_factor, Units.LENGTH_MILLIMETRES) # move to start X
-        print('move to start')
-        time.sleep(2)
-        while i <= self.end_Y:
-            self.Xaxis.move_absolute(self.end_X / self.scale_factor, Units.LENGTH_MILLIMETRES) # move to end X
-            i += self.stepover_size.get()/1000
-            print(round(i, 5))
-            self.Yaxis.move_absolute(round(i, 5) / self.scale_factor, Units.LENGTH_MILLIMETRES, wait_until_idle=False) # stepover
-            self.Xaxis.move_absolute(self.start_X / self.scale_factor, Units.LENGTH_MILLIMETRES)
-            self.scanPrecentCompleteCalculation = round((((i-self.start_Y)/(self.end_Y-self.start_Y))*100), 1)
-            self.scanProgress.config(text='Percent complete:')
-            self.scanProgress.update_idletasks()
-            self.ScanProgressPercent.config(text=self.scanPrecentCompleteCalculation)
-        self.scanProgress.config(text='Scan Complete')
-        self.ScanProgressPercent.config(text='')
+
+        try:
+            # sets velocity of stage sand moves to starting XY position
+            self.Xaxis.settings.set("maxspeed", self.scan_speed.get(), Units.VELOCITY_MILLIMETRES_PER_SECOND)
+            self.Yaxis.move_absolute(i, Units.LENGTH_MILLIMETRES, wait_until_idle=False)
+            self.Xaxis.move_absolute(self.start_X, Units.LENGTH_MILLIMETRES)
+
+            # calculates and sets trigger
+            self.xyController.generic_command(self.trigger_command_creator(self.stepover_size.get(), "X"), check_errors=True)
+            time.sleep(2)
+
+            while i <= self.end_Y:
+                # enable trigger and move from stating X to ending X
+                self.xyController.generic_command("trigger 1 enable", check_errors=True)
+                self.Xaxis.move_absolute(self.end_X, Units.LENGTH_MILLIMETRES) # move to end X
+
+                i += self.stepover_size.get() / 1000
+                self.xyController.generic_command("trigger 1 disable", check_errors=True)
+
+                print(round(i, 5))
+                self.Yaxis.move_absolute(round(i, 5), Units.LENGTH_MILLIMETRES, wait_until_idle=False) # stepover
+                self.Xaxis.move_absolute(self.start_X, Units.LENGTH_MILLIMETRES)
+
+                # calculate how much of the scan has been completed and update status feed
+                self.scanPrecentCompleteCalculation = round(((i-self.start_Y)/(self.end_Y-self.start_Y))*100, 1)
+                self.status_feed.config(text=("Precent complete: " + str(self.scanPrecentCompleteCalculation) + "%"))
+                self.status_feed.update_idletasks()
+
+        except MotionLibException as err:
+            print(err)
+
+        # Update status feed to scan complete
+        self.status_feed.config(text='Scan Complete')
+
+    def scan_line(self):
+        '''
+        Code that takes the start and end points of a line, calculates each axis's velocity, and commands stage
+        to the start/end points
+        '''
+        # Update scan status to starting scan
+        self.status_feed.config(text='Scan Starting')
+        self.status_feed.update_idletasks()
+
+        # Determines which X and Y value is the smallest and sets that value to the starting point
+        if self.finalLineX >= self.initialLineX:
+            self.start_X = self.initialLineX
+            self.end_X = self.finalLineX
+        else:
+            self.start_X = self.finalLineX
+            self.end_X = self.initialLineX
+
+        if self.finalLineY >= self.initialLineY:
+            self.start_Y = self.initialLineY
+            self.end_Y = self.finalLineY
+        else:
+            self.start_Y = self.finalLineY
+            self.end_Y = self.initialLineY
+
+        # calculate the total X, total Y, and line distance of item
+        self.x_distance = (self.end_X - self.start_X)/self.scale_factor
+        self.y_distance = (self.end_Y - self.start_Y)/self.scale_factor
+        self.total_move_distance = math.sqrt(abs(self.x_distance) ** 2 + abs(self.y_distance) ** 2)
+
+        # calculate trigger size for X axis based on stepover size
+        if self.x_distance >= self.y_distance:
+            self.line_trigger_value = self.stepover_size.get() * (self.x_distance*1000) / (
+                    self.total_move_distance*1000)
+            self.which_axis = "X"
+        else:
+            self.line_trigger_value = self.stepover_size.get() * (self.y_distance * 1000) / (
+                        self.total_move_distance * 1000)
+            self.which_axis = "Y"
+
+        print("X Values:", self.start_X, self.end_X)
+        print("Y Values:", self.start_Y, self.end_Y)
+
+        try:
+            # set and turn on Zaber trigger
+            self.xyController.generic_command(self.trigger_command_creator(self.line_trigger_value, self.which_axis), check_errors=True)
+            self.xyController.generic_command("trigger 1 enable", check_errors=True)
+
+            # set velocity
+            self.Xaxis.settings.set("maxspeed", self.scan_speed.get(), Units.VELOCITY_MILLIMETRES_PER_SECOND)
+            self.Yaxis.settings.set("maxspeed", self.scan_speed.get(), Units.VELOCITY_MILLIMETRES_PER_SECOND)
+
+            # move to stating point and chill for a second
+            self.Xaxis.move_absolute(self.start_X / self.scale_factor, Units.LENGTH_MILLIMETRES, wait_until_idle=False)
+            self.Yaxis.move_absolute(self.start_Y / self.scale_factor, Units.LENGTH_MILLIMETRES, wait_until_idle=True)
+            time.sleep(2)
+
+            # move from starting position to ending position
+            self.Xaxis.move_absolute(self.end_X / self.scale_factor, Units.LENGTH_MILLIMETRES, wait_until_idle=False)
+            self.Yaxis.move_absolute(self.end_Y / self.scale_factor, Units.LENGTH_MILLIMETRES)
+
+        except MotionLibException as err:
+            print(err)
+
+        # Update status feed to scan complete
+        self.status_feed.config(text='Scan Complete')
+        self.status_feed.update_idletasks()
 
     def zStageUpStart(self, e):
-        self.Zaxis.move_velocity((-1*self.zStageSpeed.get()/1000), unit=Units.VELOCITY_MILLIMETRES_PER_SECOND)
-        print('Z Up at speed', (-1*self.zStageSpeed.get()/1000))
+        try:
+            self.Zaxis.move_velocity((-1*self.zStageSpeed.get()/1000), unit=Units.VELOCITY_MILLIMETRES_PER_SECOND)
+        except MotionLibException as err:
+            print(err)
 
     def zStageUpEnd(self, e):
-        self.Zaxis.stop(wait_until_idle=True)
-        print('Z Stop')
+        try:
+            self.Zaxis.stop(wait_until_idle=True)
+        except MotionLibException as err:
+            print(err)
 
     def zStageDownStart(self, e):
-        self.Zaxis.move_velocity((self.zStageSpeed.get()/1000), unit=Units.VELOCITY_MILLIMETRES_PER_SECOND)
-        print('Z Down at speed', (self.zStageSpeed.get()/1000))
+        try:
+            self.Zaxis.move_velocity((self.zStageSpeed.get()/1000), unit=Units.VELOCITY_MILLIMETRES_PER_SECOND)
+        except MotionLibException as err:
+            print(err)
 
     def zStageDownEnd(self, e):
-        self.Zaxis.stop(wait_until_idle=True)
-        print('Z Stop')
+        try:
+            self.Zaxis.stop(wait_until_idle=True)
+        except MotionLibException as err:
+            print(err)
+
+    def trigger_command_creator(self, e, i):
+        '''
+        Inputs: step over size (user input), micro step size (value from Zaber), axis resolution (value from Zaber)
+        :return: ASCII protocal for updating trigger to specified step value
+        '''
+
+        self.trigger_value = int(e / self.micro_step_size)
+        if i == "X":
+            self.trigger_command = "trigger dist 1 1 " + str(self.trigger_value)
+            print("X axis trigger")
+        else:
+            self.trigger_command = "trigger dist 1 2 " + str(self.trigger_value)
+            print("Y axis trigger")
+        return(self.trigger_command)
 
     '''def videoFeed(self):
         self.original = Image.open("C:/Users/Matt Goode/Pictures/IowaStateCyclones.png")
@@ -304,11 +421,18 @@ class MainGUI:
         self.c.create_image(0, 0, image=self.videofeed, anchor=NW)'''
 
     def rotateGrating(self):
-        self.desiredGratingAngle = int(self.gratingAngle.get())
-        self.rotaryStage.move_to(self.desiredGratingAngle)
-        self.rotaryStage.wait_for_move(timeout=None)
+        '''
+        Commands Thorlabs K10CR1/M to rotate to specified angle
+        '''
+        if int(self.gratingAngle.get()) != round(self.rotaryStage.get_position(), 0):
+            self.desiredGratingAngle = int(self.gratingAngle.get())
+            self.rotaryStage.move_to(self.desiredGratingAngle)
+            self.rotaryStage.wait_for_move(timeout=None)
 
     def videoFeed(self):
+        '''
+        Sets up query to camera on computer to update the background image of the canvas
+        '''
         _, frame = self.cap.read()
         self.cv2image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGBA)
         self.img = Image.fromarray(self.cv2image)
