@@ -14,8 +14,8 @@ from pylablib.aux_libs.devices import Thorlabs
 
 
 class MainGUI:
-    canvas_x = 900  # pixel size of canvas GUI
-    canvas_y = 900  # pixel size of canvas GUI
+    canvas_x = 600  # pixel size of canvas GUI
+    canvas_y = 600  # pixel size of canvas GUI
     scale_factor = canvas_x/300  # determines scale factor for canvas to mm of the linear stages
     cap = cv2.VideoCapture(0)
     rotaryStage = Thorlabs.K10CR1(str(55142424))
@@ -317,11 +317,11 @@ class MainGUI:
 
             while i <= self.end_Y:
                 # enable trigger and move from stating X to ending X
-                self.xyController.generic_command("trigger 1 enable", check_errors=True)
+                self.xyController.generic_command("trigger dist 1 enable", check_errors=True)
                 self.Xaxis.move_absolute(self.end_X, Units.LENGTH_MILLIMETRES) # move to end X
 
                 i += self.stepover_size.get() / 1000
-                self.xyController.generic_command("trigger 1 disable", check_errors=True)
+                self.xyController.generic_command("trigger dist 1 disable", check_errors=True)
 
                 print(round(i, 5))
                 self.Yaxis.move_absolute(round(i, 5), Units.LENGTH_MILLIMETRES, wait_until_idle=False) # stepover
@@ -381,12 +381,7 @@ class MainGUI:
         print("Y Values:", self.start_Y, self.end_Y)
 
         try:
-            # set and turn on Zaber trigger
-            self.xyController.generic_command(self.trigger_command_creator(self.line_trigger_value, self.which_axis),
-                                              check_errors=True)
-            self.xyController.generic_command("trigger 1 enable", check_errors=True)
-
-            # set velocity
+                        # set velocity
             self.Xaxis.settings.set("maxspeed", self.scan_speed.get(), Units.VELOCITY_MILLIMETRES_PER_SECOND)
             self.Yaxis.settings.set("maxspeed", self.scan_speed.get(), Units.VELOCITY_MILLIMETRES_PER_SECOND)
 
@@ -395,9 +390,16 @@ class MainGUI:
             self.Yaxis.move_absolute(self.start_Y / self.scale_factor, Units.LENGTH_MILLIMETRES, wait_until_idle=True)
             time.sleep(2)
 
+            # set Zaber trigger
+            self.xyController.generic_command(self.trigger_command_creator(self.line_trigger_value, self.which_axis),
+                check_errors=True)
+            self.xyController.generic_command("trigger dist 1 enable", check_errors=True)
+
             # move from starting position to ending position
             self.Xaxis.move_absolute(self.end_X / self.scale_factor, Units.LENGTH_MILLIMETRES, wait_until_idle=False)
             self.Yaxis.move_absolute(self.end_Y / self.scale_factor, Units.LENGTH_MILLIMETRES)
+
+            self.xyController.generic_command("trigger dist 1 disable", check_errors=True)
 
         except MotionLibException as err:
             messagebox.showerror('Error', err)

@@ -51,6 +51,7 @@ class MSO64:
     def configTrigger(self):
         self.triggerCommand = "TRIG:A:TYP LOGI;:TRIG:A:LOGI:FUNC AND;:TRIG:A:LOGICP:CH1 X;:TRIG:A:LOGICP:CH2 HIGH;"
         self.triggerCommand += ":TRIG:A:LOGICP:CH3 HIGH;:TRIG:A:LOGICP:CH4 X;"
+        self.triggerCommand += ":TRIG:A:LOGICP:AUX HIGH;:TRIG:A:LEV:AUX 1.0;"
         self.triggerCommand += ":TRIG:A:LEV:CH2 " + self.Phototrigger + ";:TRIG:A:LEV:CH3 1.0;"
 
         self.scope.write(self.triggerCommand)
