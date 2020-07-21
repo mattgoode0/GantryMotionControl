@@ -367,6 +367,10 @@ class MainGUI:
         self.y_distance = (self.end_Y - self.start_Y)/self.scale_factor
         self.total_move_distance = math.sqrt(abs(self.x_distance) ** 2 + abs(self.y_distance) ** 2)
 
+        # calculate velocity of each axis
+        self.x_velocity = (self.x_distance / self.total_move_distance) * self.scan_speed.get()
+        self.y_velocity = (self.y_distance / self.total_move_distance) * self.scan_speed.get()
+
         # calculate trigger size for X axis based on stepover size
         if self.x_distance >= self.y_distance:
             self.line_trigger_value = self.stepover_size.get() * (self.x_distance*1000) / (
@@ -381,14 +385,14 @@ class MainGUI:
         print("Y Values:", self.start_Y, self.end_Y)
 
         try:
-                        # set velocity
-            self.Xaxis.settings.set("maxspeed", self.scan_speed.get(), Units.VELOCITY_MILLIMETRES_PER_SECOND)
-            self.Yaxis.settings.set("maxspeed", self.scan_speed.get(), Units.VELOCITY_MILLIMETRES_PER_SECOND)
+            # set velocity
+            self.Xaxis.settings.set("maxspeed", self.x_velocity, Units.VELOCITY_MILLIMETRES_PER_SECOND)
+            self.Yaxis.settings.set("maxspeed", self.y_velocity, Units.VELOCITY_MILLIMETRES_PER_SECOND)
 
             # move to stating point and chill for a second
             self.Xaxis.move_absolute(self.start_X / self.scale_factor, Units.LENGTH_MILLIMETRES, wait_until_idle=False)
             self.Yaxis.move_absolute(self.start_Y / self.scale_factor, Units.LENGTH_MILLIMETRES, wait_until_idle=True)
-            time.sleep(2)
+            time.sleep(1)
 
             # set Zaber trigger
             self.xyController.generic_command(self.trigger_command_creator(self.line_trigger_value, self.which_axis),
